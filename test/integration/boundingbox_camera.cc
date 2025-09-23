@@ -158,7 +158,7 @@ TEST_F(BoundingBoxCameraTest, SimpleBoxes)
   camera->SetImageHeight(height);
   camera->SetAspectRatio(1.333);
   camera->SetHFOV(GZ_PI / 2);
-  camera->SetBoundingBoxType(BoundingBoxType::BBT_VISIBLEBOX2D);
+  camera->SetBoundingBoxType(BoundingBoxType::BBT_VISIBLEBOX2D, BoundingBoxType::BBT_BOX3D);
 
   EXPECT_EQ(camera->ImageWidth(), width);
   EXPECT_EQ(camera->ImageHeight(), height);
@@ -168,7 +168,7 @@ TEST_F(BoundingBoxCameraTest, SimpleBoxes)
 
   // Set a callback on the  camera sensor to get a BoundingBox camera frame
   gz::common::ConnectionPtr connection =
-    camera->ConnectNewBoundingBoxes(
+    camera->ConnectNewBoundingBoxes2D(
       std::bind(OnNewBoundingBoxes, std::placeholders::_1));
   EXPECT_NE(nullptr, connection);
 
@@ -220,8 +220,9 @@ TEST_F(BoundingBoxCameraTest, OccludedBoxes)
   camera->SetLocalPosition(0.0, 0.0, 0.0);
   camera->SetLocalRotation(0.0, 0.0, 0.0);
 
-  camera->SetBoundingBoxType(BoundingBoxType::BBT_VISIBLEBOX2D);
-  EXPECT_EQ(camera->Type(), BoundingBoxType::BBT_VISIBLEBOX2D);
+  camera->SetBoundingBoxType(BoundingBoxType::BBT_VISIBLEBOX2D, BoundingBoxType::BBT_BOX3D);
+  EXPECT_EQ(camera->Type2d(), BoundingBoxType::BBT_VISIBLEBOX2D);
+  EXPECT_EQ(camera->Type3d(), BoundingBoxType::BBT_BOX3D);
 
   unsigned int width = 320;
   unsigned int height = 240;
@@ -239,7 +240,7 @@ TEST_F(BoundingBoxCameraTest, OccludedBoxes)
 
   // Set a callback on the  camera sensor to get a BoundingBox camera frame
   gz::common::ConnectionPtr connection =
-    camera->ConnectNewBoundingBoxes(
+    camera->ConnectNewBoundingBoxes2D(
       std::bind(OnNewBoundingBoxes, std::placeholders::_1));
   EXPECT_NE(nullptr, connection);
 
@@ -274,7 +275,7 @@ TEST_F(BoundingBoxCameraTest, OccludedBoxes)
   g_mutex.unlock();
 
   // Full Boxes Type Test
-  camera->SetBoundingBoxType(BoundingBoxType::BBT_FULLBOX2D);
+  camera->SetBoundingBoxType(BoundingBoxType::BBT_FULLBOX2D, BoundingBoxType::BBT_BOX3D);
   // Update once to create image
   camera->Update();
 
@@ -330,7 +331,7 @@ TEST_F(BoundingBoxCameraTest, Oriented3dBoxes)
   camera->SetImageHeight(height);
   camera->SetAspectRatio(1.333);
   camera->SetHFOV(GZ_PI / 2);
-  camera->SetBoundingBoxType(BoundingBoxType::BBT_BOX3D);
+  camera->SetBoundingBoxType(BoundingBoxType::BBT_BOX3D, BoundingBoxType::BBT_BOX3D);
 
   EXPECT_EQ(camera->ImageWidth(), width);
   EXPECT_EQ(camera->ImageHeight(), height);
@@ -340,7 +341,7 @@ TEST_F(BoundingBoxCameraTest, Oriented3dBoxes)
 
   // Set a callback on the  camera sensor to get a BoundingBox camera frame
   gz::common::ConnectionPtr connection =
-    camera->ConnectNewBoundingBoxes(
+    camera->ConnectNewBoundingBoxes2D(
       std::bind(OnNewBoundingBoxes, std::placeholders::_1));
   EXPECT_NE(nullptr, connection);
 

@@ -39,7 +39,7 @@ TEST_F(BoundingBoxCameraTest, BoundingBoxCamera)
 
   BoundingBoxCameraPtr camera(scene->CreateBoundingBoxCamera());
   ASSERT_NE(nullptr, camera);
-  camera->SetBoundingBoxType(BoundingBoxType::BBT_VISIBLEBOX2D);
+  camera->SetBoundingBoxType(BoundingBoxType::BBT_VISIBLEBOX2D, BoundingBoxType::BBT_BOX3D);
 
   // Test Draw Bounding Box
   int width = 200;
@@ -69,9 +69,11 @@ TEST_F(BoundingBoxCameraTest, BoundingBoxCamera)
   EXPECT_EQ(data[maxIndex + 1], 255);
 
   // Test Bounding Box Type
-  EXPECT_EQ(camera->Type(), BoundingBoxType::BBT_VISIBLEBOX2D);
-  camera->SetBoundingBoxType(BoundingBoxType::BBT_FULLBOX2D);
-  EXPECT_EQ(camera->Type(), BoundingBoxType::BBT_FULLBOX2D);
+  EXPECT_EQ(camera->Type2d(), BoundingBoxType::BBT_VISIBLEBOX2D);
+  EXPECT_EQ(camera->Type3d(), BoundingBoxType::BBT_BOX3D);
+  camera->SetBoundingBoxType(BoundingBoxType::BBT_FULLBOX2D, BoundingBoxType::BBT_BOX3D);
+  EXPECT_EQ(camera->Type2d(), BoundingBoxType::BBT_FULLBOX2D);
+  EXPECT_EQ(camera->Type3d(), BoundingBoxType::BBT_BOX3D);
 
   // Clean up
   engine->DestroyScene(scene);

@@ -15,6 +15,7 @@
  *
  */
 
+#include <gz/math/Quaternion.hh>
 #include <limits>
 
 #ifdef _MSC_VER
@@ -131,14 +132,20 @@ class gz::rendering::Ogre2BoundingBoxCameraPrivate
 
   /// \brief New BoundingBox Frame Event to notify listeners with new data
   public: common::EventT<void(const std::vector<BoundingBox> &)>
-        newBoundingBoxes;
+        newBoundingBoxes2d;
+
+  /// \brief New BoundingBox Frame Event to notify listeners with new data
+  public: common::EventT<void(const std::vector<BoundingBox> &)>
+        newBoundingBoxes3d;
 
   /// \brief Image / Render Texture Format
   public: Ogre::PixelFormatGpu format = Ogre::PFG_RGBA8_UNORM;
 
   /// \brief map ogreId id to bounding box
   /// Key: ogreId, value: bounding box contains max & min boundaries
-  public: std::map<uint32_t, std::shared_ptr<BoundingBox>> boundingboxes;
+  public: std::map<uint32_t, std::shared_ptr<BoundingBox>> boundingboxes2d;
+
+  public: std::map<uint32_t, std::shared_ptr<BoundingBox>> boundingboxes3d;
 
   /// \brief Keep track of the visible bounding boxes (used in filtering)
   /// Key: ogreId, value: label id
@@ -163,10 +170,13 @@ class gz::rendering::Ogre2BoundingBoxCameraPrivate
   public: std::map<uint32_t, Ogre::Item *> ogreIdToItem;
 
   /// \brief Output bounding boxes to notify listeners
-  public: std::vector<BoundingBox> outputBoxes;
+  public: std::vector<BoundingBox> outputBoxes2d;
+
+  public: std::vector<BoundingBox> outputBoxes3d;
 
   /// \brief Bounding Box type
-  public: BoundingBoxType type {BoundingBoxType::BBT_VISIBLEBOX2D};
+  public: BoundingBoxType type2d {BoundingBoxType::BBT_VISIBLEBOX2D};
+  public: BoundingBoxType type3d {BoundingBoxType::BBT_BOX3D};
 
   /// \brief Alias variable that's used in the ClipToViewPort and
   /// LocationRelativeToViewPort methods.
@@ -480,7 +490,8 @@ void Ogre2BoundingBoxCamera::PreRender()
     }
   }
 
-  this->dataPtr->outputBoxes.clear();
+  this->dataPtr->outputBoxes2d.clear();
+  this->dataPtr->outputBoxes3d.clear();
 }
 
 /////////////////////////////////////////////////
@@ -590,7 +601,8 @@ void Ogre2BoundingBoxCamera::Render()
 void Ogre2BoundingBoxCamera::PostRender()
 {
   // return if no one is listening to the new frame
-  if (this->dataPtr->newBoundingBoxes.ConnectionCount() == 0)
+  if (this->dataPtr->newBoundingBoxes2d.ConnectionCount() == 0
+      && this->dataPtr->newBoundingBoxes3d.ConnectionCount() == 0)
     return;
 
   if (!this->dataPtr->ogreRenderTexture)
@@ -636,22 +648,29 @@ void Ogre2BoundingBoxCamera::PostRender()
     }
   }
 
-  if (this->dataPtr->type == BoundingBoxType::BBT_VISIBLEBOX2D)
-    this->VisibleBoundingBoxes();
-  else if (this->dataPtr->type == BoundingBoxType::BBT_FULLBOX2D)
-    this->FullBoundingBoxes();
-  else if (this->dataPtr->type == BoundingBoxType::BBT_BOX3D)
-    this->BoundingBoxes3D();
-
-  this->dataPtr->boundingboxes.clear();
+  this->dataPtr->boundingboxes2d.clear();
+  this->dataPtr->boundingboxes3d.clear();
   this->dataPtr->visibleBoxesLabel.clear();
+
+  if (this->dataPtr->type2d == BoundingBoxType::BBT_VISIBLEBOX2D)
+    this->VisibleBoundingBoxes();
+  else if (this->dataPtr->type2d == BoundingBoxType::BBT_FULLBOX2D)
+    this->FullBoundingBoxes();
+
+  if (this->dataPtr->type3d == BoundingBoxType::BBT_BOX3D)
+    this->BoundingBoxes3D(); // uses visibleBoxesLabel
+
   this->dataPtr->parentNameToBoxes.clear();
   this->dataPtr->parentNameToOgreIds.clear();
   this->dataPtr->itemVertices.clear();
   this->dataPtr->ogreIdToItem.clear();
   this->dataPtr->materialSwitcher->ogreIdName.clear();
 
-  this->dataPtr->newBoundingBoxes(this->dataPtr->outputBoxes);
+  if (this->dataPtr->type2d != BoundingBoxType::BBT_NONE && this->dataPtr->newBoundingBoxes2d.ConnectionCount() != 0)
+    this->dataPtr->newBoundingBoxes2d(this->dataPtr->outputBoxes2d);
+
+  if (this->dataPtr->type3d != BoundingBoxType::BBT_NONE && this->dataPtr->newBoundingBoxes3d.ConnectionCount() != 0)
+    this->dataPtr->newBoundingBoxes3d(this->dataPtr->outputBoxes3d);
 }
 
 /////////////////////////////////////////////////
@@ -661,6 +680,10 @@ void Ogre2BoundingBoxCamera::MarkVisibleBoxes()
   {
     gzerr << "Null buffer" << std::endl;
     return;
+  }
+
+  if (!this->dataPtr->visibleBoxesLabel.empty()) {
+    return; // only once
   }
 
   uint32_t width = this->ImageWidth();
@@ -778,7 +801,7 @@ void Ogre2BoundingBoxCameraPrivate::MeshVertices(
 void Ogre2BoundingBoxCamera::MergeMultiLinksModels3D()
 {
   // Combine the boxes with the same parent name together to merge them
-  for (const auto &box : this->dataPtr->boundingboxes)
+  for (const auto &box : this->dataPtr->boundingboxes3d)
   {
     auto ogreId = box.first;
     auto parentName = this->dataPtr->materialSwitcher->ogreIdName[ogreId];
@@ -793,8 +816,8 @@ void Ogre2BoundingBoxCamera::MergeMultiLinksModels3D()
     // If not a multi-link model, add the 3d box from the OGRE API
     if (ogreIds.size() == 1)
     {
-      auto box = this->dataPtr->boundingboxes[ogreIds[0]];
-      this->dataPtr->outputBoxes.push_back(*box);
+      auto box = this->dataPtr->boundingboxes3d[ogreIds[0]];
+      this->dataPtr->outputBoxes3d.push_back(*box);
     }
     else
     {
@@ -815,20 +838,20 @@ void Ogre2BoundingBoxCamera::MergeMultiLinksModels3D()
       box.SetSize(mergedBox.Size());
       box.SetLabel(this->dataPtr->visibleBoxesLabel[ogreIds[0]]);
 
-      this->dataPtr->outputBoxes.push_back(box);
+      this->dataPtr->outputBoxes3d.push_back(box);
     }
   }
 
   // reverse the order of the boxes (useful in testing)
-  std::reverse(this->dataPtr->outputBoxes.begin(),
-    this->dataPtr->outputBoxes.end());
+  std::reverse(this->dataPtr->outputBoxes3d.begin(),
+    this->dataPtr->outputBoxes3d.end());
 }
 
 /////////////////////////////////////////////////
 void Ogre2BoundingBoxCamera::MergeMultiLinksModels2D()
 {
   // Combine the boxes with the same parent name together to merge them
-  for (const auto &box : this->dataPtr->boundingboxes)
+  for (const auto &box : this->dataPtr->boundingboxes2d)
   {
     auto ogreId = box.first;
     auto parentName = this->dataPtr->materialSwitcher->ogreIdName[ogreId];
@@ -841,12 +864,12 @@ void Ogre2BoundingBoxCamera::MergeMultiLinksModels2D()
     auto mergedBox = this->dataPtr->MergeBoxes2D(nameToBoxes.second);
 
     // Store boxes in the output vector
-    this->dataPtr->outputBoxes.push_back(mergedBox);
+    this->dataPtr->outputBoxes2d.push_back(mergedBox);
   }
 
   // reverse the order of the boxes (usful in testing)
-  std::reverse(this->dataPtr->outputBoxes.begin(),
-    this->dataPtr->outputBoxes.end());
+  std::reverse(this->dataPtr->outputBoxes2d.begin(),
+    this->dataPtr->outputBoxes2d.end());
 }
 
 /////////////////////////////////////////////////
@@ -938,26 +961,30 @@ void Ogre2BoundingBoxCamera::BoundingBoxes3D()
 
     // Position in camera coord
     Ogre::Vector3 viewPosition = viewMatrix * position;
+    viewPosition.y = -1.0 * viewPosition.y;
+    viewPosition.z = -1.0 * viewPosition.z;
 
     // Convert to gz::math
     box->SetCenter(Ogre2Conversions::Convert(viewPosition));
     box->SetSize(Ogre2Conversions::Convert(size));
 
     // Compute the rotation of the box from its world rotation & view matrix
-    auto worldCameraRotation = Ogre2Conversions::Convert(
-      viewMatrix.extractQuaternion());
-    auto bodyWorldRotation = Ogre2Conversions::Convert(orientation);
+    auto worldCameraRotation = Ogre2Conversions::Convert(this->dataPtr->ogreCamera->getDerivedOrientation());
+    auto worldObjectRotation = Ogre2Conversions::Convert(orientation);
+    
+    math::Quaterniond cameraPose; cameraPose.SetFromEuler(M_PI, 0, 0);
 
-    // Body to camera rotation = body_world * world_camera
-    auto bodyCameraRotation = worldCameraRotation * bodyWorldRotation;
+    auto worldCameraRotationFixed = worldCameraRotation * cameraPose;
+    // Body to camera rotation = worldObjectRotation * worldCameraRotation
+    auto bodyCameraRotation = worldCameraRotationFixed.Inverse() * worldObjectRotation;
     box->SetOrientation(bodyCameraRotation);
 
-    this->dataPtr->boundingboxes[ogreId] = box;
+    this->dataPtr->boundingboxes3d[ogreId] = box;
     itor.moveNext();
   }
 
   // Set boxes labels
-  for (const auto &box : this->dataPtr->boundingboxes)
+  for (const auto &box : this->dataPtr->boundingboxes3d)
   {
     uint32_t ogreId = box.first;
     uint32_t label = this->dataPtr->visibleBoxesLabel[ogreId];
@@ -1008,11 +1035,14 @@ void Ogre2BoundingBoxCamera::VisibleBoundingBoxes()
         // get the OGRE id of 16 bit value
         uint32_t ogreId = ogreId1 * 256 + ogreId2;
 
+        if (!this->dataPtr->visibleBoxesLabel.count(ogreId))
+          this->dataPtr->visibleBoxesLabel[ogreId] = label;
+
         std::shared_ptr<BoundingBox> box;
         std::shared_ptr<BoxBoundary> boundary;
 
         // create new boxes when its first pixel appears
-        if (!this->dataPtr->boundingboxes.count(ogreId))
+        if (!this->dataPtr->boundingboxes2d.count(ogreId))
         {
           box = std::make_shared<BoundingBox>();
           box->SetLabel(label);
@@ -1024,7 +1054,7 @@ void Ogre2BoundingBoxCamera::VisibleBoundingBoxes()
           boundary->maxY = 0;
 
           boxesBoundary[ogreId] = boundary;
-          this->dataPtr->boundingboxes[ogreId] = box;
+          this->dataPtr->boundingboxes2d[ogreId] = box;
         }
         else
         {
@@ -1039,7 +1069,7 @@ void Ogre2BoundingBoxCamera::VisibleBoundingBoxes()
     }
   }
 
-  for (const auto &box : this->dataPtr->boundingboxes)
+  for (const auto &box : this->dataPtr->boundingboxes2d)
   {
     // Get the box's boundary
     auto ogreId = box.first;
@@ -1132,13 +1162,13 @@ void Ogre2BoundingBoxCamera::FullBoundingBoxes()
         {minVertex.x + boxWidth / 2, maxVertex.y + boxHeight / 2, 0});
     box->SetSize({boxWidth, boxHeight, 0});
 
-    this->dataPtr->boundingboxes[ogreId] = box;
+    this->dataPtr->boundingboxes2d[ogreId] = box;
 
     itor.moveNext();
   }
 
   // Set boxes label
-  for (auto box : this->dataPtr->boundingboxes)
+  for (auto box : this->dataPtr->boundingboxes2d)
   {
     uint32_t ogreId = box.first;
     uint32_t label = this->dataPtr->visibleBoxesLabel[ogreId];
@@ -1345,7 +1375,7 @@ void Ogre2BoundingBoxCamera::DrawBoundingBox(unsigned char *_data,
     const math::Color &_color, const BoundingBox &_box) const
 {
   // 3D box
-  if (this->Type() == BoundingBoxType::BBT_BOX3D)
+  if (this->Type3d() == BoundingBoxType::BBT_BOX3D)
   {
     // Get the 3D vertices of the box in 3D camera coord.
     auto vertices = _box.Vertices3D();
@@ -1509,17 +1539,30 @@ void Ogre2BoundingBoxCamera::ConvertToScreenCoord(
 }
 
 /////////////////////////////////////////////////
-const std::vector<BoundingBox> &Ogre2BoundingBoxCamera::BoundingBoxData() const
+const std::vector<BoundingBox> &Ogre2BoundingBoxCamera::BoundingBoxData2d() const
 {
-  return this->dataPtr->outputBoxes;
+  return this->dataPtr->outputBoxes2d;
+}
+
+/////////////////////////////////////////////////
+const std::vector<BoundingBox> &Ogre2BoundingBoxCamera::BoundingBoxData3d() const
+{
+  return this->dataPtr->outputBoxes3d;
 }
 
 /////////////////////////////////////////////////
 common::ConnectionPtr
-  Ogre2BoundingBoxCamera::ConnectNewBoundingBoxes(
+  Ogre2BoundingBoxCamera::ConnectNewBoundingBoxes2D(
   std::function<void(const std::vector<BoundingBox> &)>  _subscriber)
 {
-  return this->dataPtr->newBoundingBoxes.Connect(_subscriber);
+  return this->dataPtr->newBoundingBoxes2d.Connect(_subscriber);
+}
+
+common::ConnectionPtr
+  Ogre2BoundingBoxCamera::ConnectNewBoundingBoxes3D(
+  std::function<void(const std::vector<BoundingBox> &)>  _subscriber)
+{
+  return this->dataPtr->newBoundingBoxes3d.Connect(_subscriber);
 }
 
 /////////////////////////////////////////////////
@@ -1539,13 +1582,20 @@ RenderTargetPtr Ogre2BoundingBoxCamera::RenderTarget() const
 }
 
 /////////////////////////////////////////////////
-void Ogre2BoundingBoxCamera::SetBoundingBoxType(BoundingBoxType _type)
+void Ogre2BoundingBoxCamera::SetBoundingBoxType(BoundingBoxType _type2d, BoundingBoxType _type3d)
 {
-  this->dataPtr->type = _type;
+  this->dataPtr->type2d = _type2d;
+  this->dataPtr->type3d = _type3d;
 }
 
 /////////////////////////////////////////////////
-BoundingBoxType Ogre2BoundingBoxCamera::Type() const
+BoundingBoxType Ogre2BoundingBoxCamera::Type2d() const
 {
-  return this->dataPtr->type;
+  return this->dataPtr->type2d;
+}
+
+/////////////////////////////////////////////////
+BoundingBoxType Ogre2BoundingBoxCamera::Type3d() const
+{
+  return this->dataPtr->type3d;
 }

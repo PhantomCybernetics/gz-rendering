@@ -68,19 +68,28 @@ namespace gz
       public: virtual void PostRender() override;
 
       // Documentation inherited
-      public: virtual const std::vector<BoundingBox> &BoundingBoxData() const
+      public: virtual const std::vector<BoundingBox> &BoundingBoxData2d() const
+              override;
+
+      // Documentation inherited
+      public: virtual const std::vector<BoundingBox> &BoundingBoxData3d() const
               override;
 
       // Documentation inherited
       public: virtual common::ConnectionPtr
-        ConnectNewBoundingBoxes(
+        ConnectNewBoundingBoxes2D(
+          std::function<void(const std::vector<BoundingBox> &)>) override;
+
+      public: virtual common::ConnectionPtr
+        ConnectNewBoundingBoxes3D(
           std::function<void(const std::vector<BoundingBox> &)>) override;
 
       // Documentation inherited
-      public: virtual void SetBoundingBoxType(BoundingBoxType _type) override;
+      public: virtual void SetBoundingBoxType(BoundingBoxType _type2d, BoundingBoxType _type3d) override;
 
       // Documentation inherited
-      public: virtual BoundingBoxType Type() const override;
+      public: virtual BoundingBoxType Type2d() const override;
+      public: virtual BoundingBoxType Type3d() const override;
 
       /// \brief Create texture to hold ogre Ids to calculate the boundaries
       /// of each ogre id mask

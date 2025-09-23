@@ -36,15 +36,17 @@ namespace gz
     /// \brief BoundingBox types for Visible / Full 2D Boxes / 3D Boxes
     enum class BoundingBoxType
     {
+      BBT_NONE = 0,
+
       /// 2D box that shows the full box of occluded objects
-      BBT_FULLBOX2D = 0,
+      BBT_FULLBOX2D = 1,
 
       /// 2D box that shows the visible part of the
       /// occluded object
-      BBT_VISIBLEBOX2D = 1,
+      BBT_VISIBLEBOX2D = 2,
 
       /// 3D oriented box
-      BBT_BOX3D = 2
+      BBT_BOX3D = 3
     };
 
     /// \class BoundingBoxCamera BoundingBoxCamera.hh
@@ -61,22 +63,32 @@ namespace gz
       /// \return Buffer of bounding boxes info (label, minX, minY, maxX, maxY).
       /// If the camera's bounding box type is 3D, minZ and maxZ are also
       /// defined)
-      public: virtual const std::vector<BoundingBox> &BoundingBoxData()
+      public: virtual const std::vector<BoundingBox> &BoundingBoxData2d()
+              const = 0;
+
+      public: virtual const std::vector<BoundingBox> &BoundingBoxData3d()
               const = 0;
 
       /// \brief Connect to the new BoundingBox info
       /// \param[in] _subscriber Subscriber callback function
       /// \return Pointer to the new Connection. This must be kept in scope
-      public: virtual gz::common::ConnectionPtr ConnectNewBoundingBoxes(
+      public: virtual gz::common::ConnectionPtr ConnectNewBoundingBoxes2D(
+        std::function<void(const std::vector<BoundingBox> &)> _subscriber) = 0;
+
+      /// \brief Connect to the new BoundingBox info
+      /// \param[in] _subscriber Subscriber callback function
+      /// \return Pointer to the new Connection. This must be kept in scope
+      public: virtual gz::common::ConnectionPtr ConnectNewBoundingBoxes3D(
         std::function<void(const std::vector<BoundingBox> &)> _subscriber) = 0;
 
       /// \brief Set BoundingBox Type (Visible / Full)
       /// \param[in] _type BoundingBox Type (Visible / Full)
-      public: virtual void SetBoundingBoxType(BoundingBoxType _type) = 0;
+      public: virtual void SetBoundingBoxType(BoundingBoxType _typ2d, BoundingBoxType _typ3d) = 0;
 
       /// \brief Get the BoundingBox Type (Visible / Full)
       /// \return BoundingBox Type (Visible / Full)
-      public: virtual BoundingBoxType Type() const = 0;
+      public: virtual BoundingBoxType Type2d() const = 0;
+      public: virtual BoundingBoxType Type3d() const = 0;
 
       /// \brief Draw a bounding box on the given image
       /// \param[in] _data buffer containing the image data

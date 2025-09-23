@@ -44,27 +44,34 @@ namespace gz
       public: virtual ~BaseBoundingBoxCamera();
 
       // Documentation inherited
-      public: virtual const std::vector<BoundingBox> &BoundingBoxData() const;
+      public: virtual const std::vector<BoundingBox> &BoundingBoxData2d() const;
+      public: virtual const std::vector<BoundingBox> &BoundingBoxData3d() const;
 
       // Documentation inherited
-      public: virtual gz::common::ConnectionPtr ConnectNewBoundingBoxes(
+      public: virtual gz::common::ConnectionPtr ConnectNewBoundingBoxes2D(
+        std::function<void(const std::vector<BoundingBox> &)> _subscriber) = 0;
+
+      public: virtual gz::common::ConnectionPtr ConnectNewBoundingBoxes3D(
         std::function<void(const std::vector<BoundingBox> &)> _subscriber) = 0;
 
       // Documentation inherited
-      public: virtual void SetBoundingBoxType(BoundingBoxType _type);
+      public: virtual void SetBoundingBoxType(BoundingBoxType _type2d, BoundingBoxType _type3d);
 
       // Documentation inherited
-      public: virtual BoundingBoxType Type() const;
+      public: virtual BoundingBoxType Type2d() const;
+      public: virtual BoundingBoxType Type3d() const;
 
       // Documentation inherited
       public: virtual void DrawBoundingBox(unsigned char *_data,
         const math::Color &_color, const BoundingBox &_box) const = 0;
 
       /// \brief The bounding box type
-      protected: BoundingBoxType type = BoundingBoxType::BBT_FULLBOX2D;
+      protected: BoundingBoxType type2d = BoundingBoxType::BBT_FULLBOX2D;
+      protected: BoundingBoxType type3d = BoundingBoxType::BBT_BOX3D;
 
       /// \brief The bounding box data
-      protected: std::vector<BoundingBox> boundingBoxes;
+      protected: std::vector<BoundingBox> boundingBoxes2d;
+      protected: std::vector<BoundingBox> boundingBoxes3d;
     };
 
     //////////////////////////////////////////////////
@@ -82,23 +89,39 @@ namespace gz
     //////////////////////////////////////////////////
     template <class T>
     const std::vector<BoundingBox> &
-    BaseBoundingBoxCamera<T>::BoundingBoxData() const
+    BaseBoundingBoxCamera<T>::BoundingBoxData2d() const
     {
-      return this->boundingBoxes;
+      return this->boundingBoxes2d;
     }
 
     //////////////////////////////////////////////////
     template <class T>
-    void BaseBoundingBoxCamera<T>::SetBoundingBoxType(BoundingBoxType _type)
+    const std::vector<BoundingBox> &
+    BaseBoundingBoxCamera<T>::BoundingBoxData3d() const
     {
-      this->type = _type;
+      return this->boundingBoxes3d;
     }
 
     //////////////////////////////////////////////////
     template <class T>
-    BoundingBoxType BaseBoundingBoxCamera<T>::Type() const
+    void BaseBoundingBoxCamera<T>::SetBoundingBoxType(BoundingBoxType _type2d, BoundingBoxType _type3d)
     {
-      return this->type;
+      this->type2d = _type2d;
+      this->type3d = _type3d;
+    }
+
+    //////////////////////////////////////////////////
+    template <class T>
+    BoundingBoxType BaseBoundingBoxCamera<T>::Type2d() const
+    {
+      return this->type2d;
+    }
+
+    //////////////////////////////////////////////////
+    template <class T>
+    BoundingBoxType BaseBoundingBoxCamera<T>::Type3d() const
+    {
+      return this->type3d;
     }
     }
   }
