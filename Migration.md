@@ -1,9 +1,27 @@
 # Note on deprecations
+
 A tick-tock release cycle allows easy migration to new software versions.
 Obsolete code is marked as deprecated for one major release.
 Deprecated code produces compile-time warnings. These warning serve as
 notification to users that their code should be upgraded. The next major
 release will remove the deprecated code.
+
+## Gazebo Rendering 9.x to 10.x
+
+### Conditional Overlay Support
+
+As of gz-rendering10, the OGRE2 Overlay component dependency is removed
+due to compatibility issues (<https://github.com/OGRECave/ogre-next/issues/541>).
+By default, overlay support is enabled, but it can be disabled using the CMake
+option `USE_OGRE2_OVERLAY=OFF`. When overlay support is disabled, the following
+internal API methods will not be available:
+
+1. **Ogre2RenderEngine**
+   + Unavailable (when `USE_OGRE2_OVERLAY=OFF`): `Ogre::v1::OverlaySystem *OverlaySystem() const`
+
+Note: The `OverlaySystem` method was always marked as internal and was not part
+of the public API. This change only affects code that directly used this internal
+method.
 
 ## Gazebo Rendering 8.x to 9.x
 
