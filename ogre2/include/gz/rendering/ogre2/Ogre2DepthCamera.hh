@@ -162,6 +162,8 @@ namespace gz
 
       /// \brief Make scene our friend so it can create a camera
       private: friend class Ogre2Scene;
+
+      public: void Worker();
     };
     }
   }

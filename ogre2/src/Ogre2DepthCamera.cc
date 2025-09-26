@@ -15,6 +15,7 @@
  *
 */
 
+#include <memory>
 #if (_WIN32)
   /* Needed for std::min */
   #ifndef NOMINMAX
@@ -55,6 +56,9 @@
 #ifdef _MSC_VER
   #pragma warning(pop)
 #endif
+
+#include <thread>
+#include <queue>
 
 namespace gz
 {
@@ -174,6 +178,16 @@ class gz::rendering::Ogre2DepthCameraPrivate
 
   /// \brief Pointer to the particle target definition in the workspace
   public: Ogre::CompositorTargetDef *particleTargetDef{nullptr};
+
+  public:
+    std::vector<std::shared_ptr<Ogre::Image2>> imageBuffers;
+    uint numImageBuffers = 6;
+    uint currImageBuffer = 0;
+    bool running = false;
+    std::condition_variable queue_cv;
+    std::queue<std::shared_ptr<Ogre::Image2>> queue;
+    std::thread worker_thread;
+    std::mutex queue_mutex;
 };
 
 using namespace gz;
@@ -293,7 +307,7 @@ void Ogre2DepthCamera::Init()
 
   // create dummy render texture
   this->CreateRenderTexture();
-
+  
   this->Reset();
 }
 
@@ -313,6 +327,13 @@ void Ogre2DepthCamera::Destroy()
     delete [] this->dataPtr->depthImage;
     this->dataPtr->depthImage = nullptr;
   }
+
+  this->dataPtr->running = false;
+  this->dataPtr->queue_cv.notify_one();
+  for (size_t i = 0; i < this->dataPtr->numImageBuffers; i++) {
+    this->dataPtr->imageBuffers[i].reset();
+  }
+  this->dataPtr->imageBuffers.clear();
 
   if (!this->ogreCamera)
     return;
@@ -429,7 +450,15 @@ void Ogre2DepthCamera::CreateRenderTexture()
       std::dynamic_pointer_cast<Ogre2RenderTexture>(base);
   this->dataPtr->depthTexture->SetWidth(1);
   this->dataPtr->depthTexture->SetHeight(1);
+
+  for (size_t i = 0; i < this->dataPtr->numImageBuffers; i++) {
+    this->dataPtr->imageBuffers.push_back(std::make_shared<Ogre::Image2>());
+  }
+  this->dataPtr->running = true;
+  this->dataPtr->worker_thread = std::thread(&Ogre2DepthCamera::Worker, this);
+  this->dataPtr->worker_thread.detach();
 }
+
 
 /////////////////////////////////////////////////////////
 void Ogre2DepthCamera::CreateDepthTexture()
@@ -1155,101 +1184,134 @@ void Ogre2DepthCamera::PreRender()
 //////////////////////////////////////////////////
 void Ogre2DepthCamera::PostRender()
 {
-  unsigned int width = this->ImageWidth();
-  unsigned int height = this->ImageHeight();
-
-  PixelFormat format = PF_FLOAT32_RGBA;
-
-  int len = width * height;
-  unsigned int channelCount = PixelUtil::ChannelCount(format);
-  unsigned int bytesPerChannel = PixelUtil::BytesPerChannel(format);
-
-  Ogre::Image2 image;
-  image.convertFromTexture(this->dataPtr->ogreDepthTexture[1], 0u, 0u);
-  Ogre::TextureBox box = image.getData(0);
-  float *depthBufferTmp = static_cast<float *>(box.data);
-  if (!this->dataPtr->depthBuffer)
-  {
-    this->dataPtr->depthBuffer = new float[len * channelCount];
+  auto image = this->dataPtr->imageBuffers[this->dataPtr->currImageBuffer];
+  this->dataPtr->currImageBuffer++;
+  if (this->dataPtr->currImageBuffer == this->dataPtr->numImageBuffers-1) {
+    this->dataPtr->currImageBuffer = 0;
   }
+  image->convertFromTexture(this->dataPtr->ogreDepthTexture[1], 0u, 0u);
 
-  // copy data row by row. The texture box may not be a contiguous region of
-  // a texture
-  for (unsigned int i = 0; i < height; ++i)
   {
-    unsigned int rawDataRowIdx = i * box.bytesPerRow / bytesPerChannel;
-    unsigned int rowIdx = i * width * channelCount;
-    memcpy(&this->dataPtr->depthBuffer[rowIdx], &depthBufferTmp[rawDataRowIdx],
-        width * channelCount * bytesPerChannel);
+    std::lock_guard<std::mutex> queue_lock(this->dataPtr->queue_mutex);
+    this->dataPtr->queue.push(image);
+    this->dataPtr->queue_cv.notify_one();
   }
+}
 
-  if (!this->dataPtr->depthImage)
-  {
-    this->dataPtr->depthImage = new float[len];
-  }
+void Ogre2DepthCamera::Worker() {
+    std::cout << "Depth camera worker running" << std::endl;
 
-  // fill depth data
-  for (unsigned int i = 0; i < height; ++i)
-  {
-    unsigned int step = i*width*channelCount;
-    for (unsigned int j = 0; j < width; ++j)
-    {
-      float x = this->dataPtr->depthBuffer[step + j*channelCount];
-      this->dataPtr->depthImage[i*width + j] = x;
+    unsigned int width = this->ImageWidth();
+    unsigned int height = this->ImageHeight();
+
+    PixelFormat format = PF_FLOAT32_RGBA;
+
+    int len = width * height;
+    unsigned int channelCount = PixelUtil::ChannelCount(format);
+    unsigned int bytesPerChannel = PixelUtil::BytesPerChannel(format);
+
+    while (this->dataPtr->running) {
+
+      std::unique_lock<std::mutex> lock(this->dataPtr->queue_mutex);
+      this->dataPtr->queue_cv.wait(lock, [this] { return !this->dataPtr->queue.empty() || !this->dataPtr->running; });
+
+      if (this->dataPtr->queue.empty() || !this->dataPtr->running) 
+          break;
+      
+      std::shared_ptr<Ogre::Image2> image;
+      while (!this->dataPtr->queue.empty()) {
+          image = this->dataPtr->queue.front();
+          this->dataPtr->queue.pop();
+      }
+
+      Ogre::TextureBox box = image->getData(0);
+      float *depthBufferTmp = static_cast<float *>(box.data);
+      if (!this->dataPtr->depthBuffer)
+      {
+        this->dataPtr->depthBuffer = new float[len * channelCount];
+      }
+
+      // copy data row by row. The texture box may not be a contiguous region of
+      // a texture
+      for (unsigned int i = 0; i < height; ++i)
+      {
+        unsigned int rawDataRowIdx = i * box.bytesPerRow / bytesPerChannel;
+        unsigned int rowIdx = i * width * channelCount;
+        memcpy(&this->dataPtr->depthBuffer[rowIdx], &depthBufferTmp[rawDataRowIdx],
+            width * channelCount * bytesPerChannel);
+      }
+
+      if (!this->dataPtr->depthImage)
+      {
+        this->dataPtr->depthImage = new float[len];
+      }
+
+      // fill depth data
+      for (unsigned int i = 0; i < height; ++i)
+      {
+        unsigned int step = i*width*channelCount;
+        for (unsigned int j = 0; j < width; ++j)
+        {
+          float x = this->dataPtr->depthBuffer[step + j*channelCount];
+          this->dataPtr->depthImage[i*width + j] = x;
+        }
+      }
+      this->dataPtr->newDepthFrame(
+            this->dataPtr->depthImage, width, height, 1, "FLOAT32");
+
+      // point cloud data
+      if (this->dataPtr->newRgbPointCloud.ConnectionCount() > 0u)
+      {
+        this->dataPtr->newRgbPointCloud(
+            this->dataPtr->depthBuffer, width, height, channelCount,
+            "PF_FLOAT32_RGBA");
+
+        // Uncomment to debug color output
+        // for (unsigned int i = 0; i < height; ++i)
+        // {
+        //   unsigned int step = i*width*channelCount;
+        //   for (unsigned int j = 0; j < width; ++j)
+        //   {
+        //     float color =
+        //         this->dataPtr->depthBuffer[step + j*channelCount + 3];
+        //     // unpack rgb data
+        //     uint32_t *rgba = reinterpret_cast<uint32_t *>(&color);
+        //     unsigned int r = *rgba >> 24 & 0xFF;
+        //     unsigned int g = *rgba >> 16 & 0xFF;
+        //     unsigned int b = *rgba >> 8 & 0xFF;
+        //     gzdbg << "[" << r << "]" << "[" << g << "]" << "[" << b << "],";
+        //   }
+        //   gzdbg << std::endl;
+        // }
+
+        // Uncomment to debug xyz output
+        // gzdbg << "wxh: " << width << " x " << height << std::endl;
+        // for (unsigned int i = 0; i < height; ++i)
+        // {
+        //   for (unsigned int j = 0; j < width; ++j)
+        //   {
+        //     gzdbg << "[" << this->dataPtr->depthBuffer[i*width*4+j*4] << "]"
+        //       << "[" << this->dataPtr->depthBuffer[i*width*4+j*4+1] << "]"
+        //       << "[" << this->dataPtr->depthBuffer[i*width*4+j*4+2] << "],";
+        //   }
+        //   gzdbg << std::endl;
+        // }
+      }
+
+      // Uncomment to debug depth output
+      // gzdbg << "wxh: " << width << " x " << height << std::endl;
+      // for (unsigned int i = 0; i < height; ++i)
+      // {
+      //   for (unsigned int j = 0; j < width; ++j)
+      //   {
+      //     gzdbg << "[" << this->dataPtr->depthImage[i*width + j] << "]";
+      //   }
+      //   gzdbg << std::endl;
+      // }
+
     }
-  }
-  this->dataPtr->newDepthFrame(
-        this->dataPtr->depthImage, width, height, 1, "FLOAT32");
 
-  // point cloud data
-  if (this->dataPtr->newRgbPointCloud.ConnectionCount() > 0u)
-  {
-    this->dataPtr->newRgbPointCloud(
-        this->dataPtr->depthBuffer, width, height, channelCount,
-        "PF_FLOAT32_RGBA");
-
-    // Uncomment to debug color output
-    // for (unsigned int i = 0; i < height; ++i)
-    // {
-    //   unsigned int step = i*width*channelCount;
-    //   for (unsigned int j = 0; j < width; ++j)
-    //   {
-    //     float color =
-    //         this->dataPtr->depthBuffer[step + j*channelCount + 3];
-    //     // unpack rgb data
-    //     uint32_t *rgba = reinterpret_cast<uint32_t *>(&color);
-    //     unsigned int r = *rgba >> 24 & 0xFF;
-    //     unsigned int g = *rgba >> 16 & 0xFF;
-    //     unsigned int b = *rgba >> 8 & 0xFF;
-    //     gzdbg << "[" << r << "]" << "[" << g << "]" << "[" << b << "],";
-    //   }
-    //   gzdbg << std::endl;
-    // }
-
-    // Uncomment to debug xyz output
-    // gzdbg << "wxh: " << width << " x " << height << std::endl;
-    // for (unsigned int i = 0; i < height; ++i)
-    // {
-    //   for (unsigned int j = 0; j < width; ++j)
-    //   {
-    //     gzdbg << "[" << this->dataPtr->depthBuffer[i*width*4+j*4] << "]"
-    //       << "[" << this->dataPtr->depthBuffer[i*width*4+j*4+1] << "]"
-    //       << "[" << this->dataPtr->depthBuffer[i*width*4+j*4+2] << "],";
-    //   }
-    //   gzdbg << std::endl;
-    // }
-  }
-
-  // Uncomment to debug depth output
-  // gzdbg << "wxh: " << width << " x " << height << std::endl;
-  // for (unsigned int i = 0; i < height; ++i)
-  // {
-  //   for (unsigned int j = 0; j < width; ++j)
-  //   {
-  //     gzdbg << "[" << this->dataPtr->depthImage[i*width + j] << "]";
-  //   }
-  //   gzdbg << std::endl;
-  // }
+    std::cout << "Depth camera worker finished" << std::endl;
 }
 
 //////////////////////////////////////////////////
@@ -1340,6 +1402,7 @@ void Ogre2DepthCamera::SetShadowsNodeDefDirty()
 //////////////////////////////////////////////////
 void Ogre2DepthCamera::AddRenderPass(const RenderPassPtr &_pass)
 {
+  return;
   // hack: check and only allow gaussian noise for depth cameras
   // We create a new depth gaussion noise render pass object
   // (class declared in this src file) so that we can change the shader material
