@@ -957,15 +957,20 @@ void Ogre2BoundingBoxCamera::BoundingBoxes3D()
     auto box = std::make_shared<BoundingBox>();
 
     // Position in world coord
-    Ogre::Vector3 position = worldAabb.getCenter();
+    Ogre::Vector3 boxPosition = worldAabb.getCenter();
 
     // Position in camera coord
-    Ogre::Vector3 viewPosition = viewMatrix * position;
-    viewPosition.y = -1.0 * viewPosition.y;
-    viewPosition.z = -1.0 * viewPosition.z;
+    Ogre::Vector3 boxViewPosition = viewMatrix * boxPosition;
+    boxViewPosition.y = -1.0 * boxViewPosition.y;
+    boxViewPosition.z = -1.0 * boxViewPosition.z;
+
+    Ogre::Vector3 modelViewPosition = viewMatrix * node->_getDerivedPosition();
+    modelViewPosition.y = -1.0 * modelViewPosition.y;
+    modelViewPosition.z = -1.0 * modelViewPosition.z;
 
     // Convert to gz::math
-    box->SetCenter(Ogre2Conversions::Convert(viewPosition));
+    box->SetCenter(Ogre2Conversions::Convert(boxViewPosition));
+    box->SetModelPosition(Ogre2Conversions::Convert(modelViewPosition));
     box->SetSize(Ogre2Conversions::Convert(size));
 
     // Compute the rotation of the box from its world rotation & view matrix

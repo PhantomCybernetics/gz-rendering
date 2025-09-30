@@ -46,7 +46,9 @@ namespace gz
       BBT_VISIBLEBOX2D = 2,
 
       /// 3D oriented box
-      BBT_BOX3D = 3
+      BBT_BOX3D = 3,
+
+      BBT_MARKER3D = 4
     };
 
     /// \class BoundingBoxCamera BoundingBoxCamera.hh

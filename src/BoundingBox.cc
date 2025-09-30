@@ -27,6 +27,9 @@ class gz::rendering::BoundingBoxPrivate
   /// \brief Center of the bounding box
   public: math::Vector3d center;
 
+  /// \brief Model position
+  public: math::Vector3d modelPosition;
+
   /// \brief Size of the bounding box
   public: math::Vector3d size;
 
@@ -130,6 +133,18 @@ void BoundingBox::SetCenter(const math::Vector3d &_center)
 {
   this->dataPtr->center = _center;
   this->dataPtr->ComputeVertices();
+}
+
+/////////////////////////////////////////////////
+const math::Vector3d &BoundingBox::ModelPosition() const
+{
+  return this->dataPtr->modelPosition;
+}
+
+/////////////////////////////////////////////////
+void BoundingBox::SetModelPosition(const math::Vector3d &_position)
+{
+  this->dataPtr->modelPosition = _position;
 }
 
 /////////////////////////////////////////////////

@@ -72,7 +72,17 @@ inline namespace GZ_RENDERING_VERSION_NAMESPACE {
     /// representation. If this is a 2D bounding box, the z component should be
     /// ignored.
     public: void SetCenter(const math::Vector3d &_center);
+    
+    /// \brief Get the center of the bounding box.
+    /// \return The center of the bounding box, in (x,y,z) representation.
+    /// If this is a 2D bounding box, the z component should be ignored.
+    public: const math::Vector3d &ModelPosition() const;
 
+    /// \brief Set the model position.
+    /// \param[in] _position The position of the model, in (x,y,z)
+    /// ignored.
+    public: void SetModelPosition(const math::Vector3d &_position);
+    
     /// \brief Get the size of the bounding box.
     /// \return The size of the box (width, height, depth). If this is a 2D
     /// bounding box, the depth should be ignored.
