@@ -16,6 +16,7 @@
 */
 
 #include <memory>
+#include <ostream>
 #if (_WIN32)
   /* Needed for std::min */
   #ifndef NOMINMAX
@@ -59,6 +60,12 @@
 
 #include <thread>
 #include <queue>
+
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <GLES3/gl31.h>
+#include <GLES2/gl2ext.h>
+#include <GLES3/gl3ext.h>
 
 namespace gz
 {
@@ -185,9 +192,17 @@ class gz::rendering::Ogre2DepthCameraPrivate
     uint currImageBuffer = 0;
     bool running = false;
     std::condition_variable queue_cv;
-    std::queue<std::shared_ptr<Ogre::Image2>> queue;
+    std::queue<Ogre::TextureGpu *> queue;
     std::thread worker_thread;
     std::mutex queue_mutex;
+    
+    EGLContext eglCtx = nullptr;
+    EGLDisplay eglDisplay = nullptr;
+    EGLSurface eglSurface = nullptr;
+
+    EGLContext eglWorkerCtx = nullptr;
+    bool eglWorkerCtxSet = false;
+    //EGLSurface eglWorkerSurface = nullptr;
 };
 
 using namespace gz;
@@ -1072,8 +1087,56 @@ void Ogre2DepthCamera::Render()
 //////////////////////////////////////////////////
 void Ogre2DepthCamera::PreRender()
 {
-  if (!this->dataPtr->ogreDepthTexture[0])
+  if (this->dataPtr->eglWorkerCtx == nullptr) {
+    this->dataPtr->eglCtx = eglGetCurrentContext();
+    if (this->dataPtr->eglCtx == EGL_NO_CONTEXT) {
+        std::cout << this->Name() <<  " Error getting EGL context" << std::endl;
+        return;
+    }
+    this->dataPtr->eglDisplay = eglGetCurrentDisplay();
+    if (this->dataPtr->eglDisplay == EGL_NO_DISPLAY) {
+        std::cout << this->Name() << " Error getting EGL display" << std::endl;
+        return;
+    }       
+    this->dataPtr->eglSurface = eglGetCurrentSurface(EGL_DRAW);
+
+    std::cout << this->Name() << " Creating worker shared ctx" << std::endl;
+    EGLConfig config;
+    EGLint numConfigs = 0;
+    
+    EGLint cfg_attribs[] = {
+      EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT, // or _ES2_BIT if only ES2 supported
+      EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,       // allow off‑screen surfaces
+      EGL_RED_SIZE,   8,
+      EGL_GREEN_SIZE, 8,
+      EGL_BLUE_SIZE,  8,
+      EGL_ALPHA_SIZE, 8,
+      EGL_NONE
+    };
+    eglChooseConfig(this->dataPtr->eglDisplay, cfg_attribs, &config, 1, &numConfigs);
+    if (numConfigs < 1) {
+        std::cout << this->Name() + " No matching EGLConfig found" << std::endl;
+        return;
+    }
+    EGLint ctx_attribs[] = {
+      EGL_CONTEXT_CLIENT_VERSION, 3,
+      EGL_NONE
+    };
+    this->dataPtr->eglWorkerCtx = eglCreateContext(this->dataPtr->eglDisplay, config, this->dataPtr->eglCtx, ctx_attribs);
+    if (this->dataPtr->eglWorkerCtx == EGL_NO_CONTEXT) {
+        std::cout << this->Name() + " Error creating worker EGL context" << std::endl;
+        EGLint err = eglGetError();
+        std::cout << "eglCreateContext failed with 0x" << std::hex << err << std::endl;
+        return;
+    }
+    
+    //this->dataPtr->eglWorkerSurface = eglCreatePbufferSurface(this->dataPtr->eglDisplay, config, {});
+  }
+
+  if (!this->dataPtr->ogreDepthTexture[0]) {
     this->CreateDepthTexture();
+  }
+    
 
   if (!this->dataPtr->ogreCompositorWorkspace)
     this->CreateWorkspaceInstance();
@@ -1184,18 +1247,20 @@ void Ogre2DepthCamera::PreRender()
 //////////////////////////////////////////////////
 void Ogre2DepthCamera::PostRender()
 {
-  auto image = this->dataPtr->imageBuffers[this->dataPtr->currImageBuffer];
-  this->dataPtr->currImageBuffer++;
-  if (this->dataPtr->currImageBuffer == this->dataPtr->numImageBuffers-1) {
-    this->dataPtr->currImageBuffer = 0;
-  }
-  image->convertFromTexture(this->dataPtr->ogreDepthTexture[1], 0u, 0u);
+  // auto image = this->dataPtr->imageBuffers[this->dataPtr->currImageBuffer];
+  // this->dataPtr->currImageBuffer++;
+  // if (this->dataPtr->currImageBuffer == this->dataPtr->numImageBuffers-1) {
+  //   this->dataPtr->currImageBuffer = 0;
+  // }
+  // image->convertFromTexture(this->dataPtr->ogreDepthTexture[1], 0u, 0u);
 
   {
     std::lock_guard<std::mutex> queue_lock(this->dataPtr->queue_mutex);
-    this->dataPtr->queue.push(image);
-    this->dataPtr->queue_cv.notify_one();
+    this->dataPtr->queue.push(this->dataPtr->ogreDepthTexture[1]);
+    
   }
+
+  this->dataPtr->queue_cv.notify_one();
 }
 
 void Ogre2DepthCamera::Worker() {
@@ -1215,14 +1280,44 @@ void Ogre2DepthCamera::Worker() {
       std::unique_lock<std::mutex> lock(this->dataPtr->queue_mutex);
       this->dataPtr->queue_cv.wait(lock, [this] { return !this->dataPtr->queue.empty() || !this->dataPtr->running; });
 
-      if (this->dataPtr->queue.empty() || !this->dataPtr->running) 
+      if (this->dataPtr->queue.empty() || !this->dataPtr->running) {
+          lock.unlock();
           break;
+      } 
+        
       
-      std::shared_ptr<Ogre::Image2> image;
+      Ogre::TextureGpu * depth_texture = nullptr;
+      // std::shared_ptr<Ogre::Image2> image;
       while (!this->dataPtr->queue.empty()) {
-          image = this->dataPtr->queue.front();
+          depth_texture = this->dataPtr->queue.front();
           this->dataPtr->queue.pop();
       }
+      if (depth_texture == nullptr) {
+        lock.unlock();
+        continue;
+      }
+
+      auto image = this->dataPtr->imageBuffers[this->dataPtr->currImageBuffer];
+      this->dataPtr->currImageBuffer++;
+      if (this->dataPtr->currImageBuffer == this->dataPtr->numImageBuffers-1) {
+        this->dataPtr->currImageBuffer = 0;
+      }
+
+      if (!this->dataPtr->eglWorkerCtxSet && this->dataPtr->eglWorkerCtx != nullptr && this->dataPtr->eglWorkerCtx != EGL_NO_CONTEXT) {
+          std::cout << this->Name() << " Setting worker ctx" << std::endl;
+          eglMakeCurrent(this->dataPtr->eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, this->dataPtr->eglWorkerCtx);
+          this->dataPtr->eglWorkerCtxSet = true;
+      }
+      if (!this->dataPtr->eglWorkerCtxSet) {
+        lock.unlock();
+        continue;
+      }
+
+      //std::cout << "Depth processing tex" << std::endl;
+
+      image->convertFromTexture(depth_texture, 0u, 0u);
+
+      //std::cout << "Depth convertFromTexture ok" << std::endl;
 
       Ogre::TextureBox box = image->getData(0);
       float *depthBufferTmp = static_cast<float *>(box.data);
