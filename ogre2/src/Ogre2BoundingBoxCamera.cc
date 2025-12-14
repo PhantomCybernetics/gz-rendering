@@ -202,6 +202,8 @@ class gz::rendering::Ogre2BoundingBoxCameraPrivate
   /// LocationRelativeToViewPort methods.
   /// Binary representation of 1000
   private: const int kTop = 8;
+
+  public: std::mutex mutex; 
 };
 
 /////////////////////////////////////////////////
@@ -414,6 +416,8 @@ void Ogre2BoundingBoxCamera::CreateCamera()
 /////////////////////////////////////////////////
 void Ogre2BoundingBoxCamera::Destroy()
 {
+  std::lock_guard<std::mutex> queue_lock(this->dataPtr->mutex);
+
   this->RemoveAllRenderPasses();
 
   if (this->dataPtr->buffer)
@@ -497,6 +501,8 @@ void Ogre2BoundingBoxCamera::PreRender()
 /////////////////////////////////////////////////
 void Ogre2BoundingBoxCamera::CreateBoundingBoxTexture()
 {
+  std::lock_guard<std::mutex> queue_lock(this->dataPtr->mutex);
+
   // Camera Parameters
   this->dataPtr->ogreCamera->setNearClipDistance(this->NearClipPlane());
   this->dataPtr->ogreCamera->setFarClipDistance(this->FarClipPlane());
@@ -600,16 +606,20 @@ void Ogre2BoundingBoxCamera::Render()
 /////////////////////////////////////////////////
 void Ogre2BoundingBoxCamera::PostRender()
 {
-  // return if no one is listening to the new frame
-  if (this->dataPtr->newBoundingBoxes2d.ConnectionCount() == 0
-      && this->dataPtr->newBoundingBoxes3d.ConnectionCount() == 0)
-    return;
-
   if (!this->dataPtr->ogreRenderTexture)
   {
     gzerr << "Null render texture" << std::endl;
     return;
   }
+
+  std::lock_guard<std::mutex> queue_lock(this->dataPtr->mutex);
+  std::lock_guard<std::mutex> gpu_ticket_lock(Ogre2Scene::texture_gpu_ticket_mutex);
+  
+
+  // return if no one is listening to the new frame
+  if (this->dataPtr->newBoundingBoxes2d.ConnectionCount() == 0
+      && this->dataPtr->newBoundingBoxes3d.ConnectionCount() == 0)
+    return;
 
   unsigned int width = this->ImageWidth();
   unsigned int height = this->ImageHeight();

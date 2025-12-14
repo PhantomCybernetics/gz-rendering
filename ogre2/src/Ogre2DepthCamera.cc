@@ -108,7 +108,9 @@ class gz::rendering::Ogre2DepthCameraPrivate
   public: float *depthBuffer = nullptr;
 
   /// \brief Outgoing depth data, used by newDepthFrame event.
-  public: float *depthImage = nullptr;
+  public: std::vector<float *> depthImages;
+  public: int current_depth_image = -1;
+  public: int num_depth_images = 16;
 
   /// \brief maximum value used for data outside sensor range
   public: float dataMaxVal = gz::math::INF_D;
@@ -337,11 +339,11 @@ void Ogre2DepthCamera::Destroy()
     this->dataPtr->depthBuffer = nullptr;
   }
 
-  if (this->dataPtr->depthImage)
-  {
-    delete [] this->dataPtr->depthImage;
-    this->dataPtr->depthImage = nullptr;
+  for (float* p : this->dataPtr->depthImages) {
+    delete[] p;    // if you used new[] for arrays
+    // or: delete p;  // if you used plain new for a single float
   }
+  this->dataPtr->depthImages.clear();
 
   this->dataPtr->running = false;
   this->dataPtr->queue_cv.notify_one();
@@ -1291,9 +1293,11 @@ void Ogre2DepthCamera::Worker() {
       while (!this->dataPtr->queue.empty()) {
           depth_texture = this->dataPtr->queue.front();
           this->dataPtr->queue.pop();
+          break;
       }
-      if (depth_texture == nullptr) {
-        lock.unlock();
+      lock.unlock();
+
+      if (depth_texture == nullptr) {  
         continue;
       }
 
@@ -1309,13 +1313,15 @@ void Ogre2DepthCamera::Worker() {
           this->dataPtr->eglWorkerCtxSet = true;
       }
       if (!this->dataPtr->eglWorkerCtxSet) {
-        lock.unlock();
+        //lock.unlock();
         continue;
       }
 
       //std::cout << "Depth processing tex" << std::endl;
-
-      image->convertFromTexture(depth_texture, 0u, 0u);
+      {
+        std::lock_guard<std::mutex> gpu_ticket_lock(Ogre2Scene::texture_gpu_ticket_mutex);
+        image->convertFromTexture(depth_texture, 0u, 0u);
+      }
 
       //std::cout << "Depth convertFromTexture ok" << std::endl;
 
@@ -1336,10 +1342,19 @@ void Ogre2DepthCamera::Worker() {
             width * channelCount * bytesPerChannel);
       }
 
-      if (!this->dataPtr->depthImage)
+      if (this->dataPtr->depthImages.size() == 0)
       {
-        this->dataPtr->depthImage = new float[len];
+        for (int i = 0; i < this->dataPtr->num_depth_images; i++) {
+          auto d = new float[len];
+          this->dataPtr->depthImages.push_back(d);
+          //this->dataPtr->depthImages = new *float[];
+        //this->dataPtr->depthImage = 
+        }
       }
+      this->dataPtr->current_depth_image++;
+      if (this->dataPtr->current_depth_image >= this->dataPtr->num_depth_images)
+        this->dataPtr->current_depth_image = 0;
+      auto depthImage = this->dataPtr->depthImages[this->dataPtr->current_depth_image];
 
       // fill depth data
       for (unsigned int i = 0; i < height; ++i)
@@ -1348,11 +1363,11 @@ void Ogre2DepthCamera::Worker() {
         for (unsigned int j = 0; j < width; ++j)
         {
           float x = this->dataPtr->depthBuffer[step + j*channelCount];
-          this->dataPtr->depthImage[i*width + j] = x;
+          depthImage[i*width + j] = x;
         }
       }
       this->dataPtr->newDepthFrame(
-            this->dataPtr->depthImage, width, height, 1, "FLOAT32");
+            depthImage, width, height, 1, "FLOAT32");
 
       // point cloud data
       if (this->dataPtr->newRgbPointCloud.ConnectionCount() > 0u)

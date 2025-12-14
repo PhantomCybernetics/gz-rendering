@@ -1266,8 +1266,12 @@ void Ogre2WideAngleCamera::PostRender()
 
   // blit data from gpu to cpu
   Ogre::Image2 image;
-  image.convertFromTexture(this->dataPtr->ogreStitchTexture[kStichFinalTexture],
+  {
+    std::lock_guard<std::mutex> gpu_ticket_lock(Ogre2Scene::texture_gpu_ticket_mutex);
+    image.convertFromTexture(this->dataPtr->ogreStitchTexture[kStichFinalTexture],
                            0u, 0u);
+  }
+  
   Ogre::TextureBox box = image.getData(0u);
 
   // Convert in-place from RGBA32 to RGB24 reusing the same memory region.

@@ -117,6 +117,8 @@ class gz::rendering::Ogre2ScenePrivate
 using namespace gz;
 using namespace rendering;
 
+std::mutex Ogre2Scene::texture_gpu_ticket_mutex;
+
 //////////////////////////////////////////////////
 Ogre2Scene::Ogre2Scene(unsigned int _id, const std::string &_name) :
   BaseScene(_id, _name), dataPtr(std::make_unique<Ogre2ScenePrivate>())

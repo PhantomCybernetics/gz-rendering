@@ -18,6 +18,7 @@
 #define GZ_RENDERING_OGRE2_OGRE2SCENE_HH_
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -57,6 +58,8 @@ namespace gz
     class GZ_RENDERING_OGRE2_VISIBLE Ogre2Scene :
       public BaseScene
     {
+      public: static std::mutex texture_gpu_ticket_mutex;
+
       /// \brief Constructor
       /// \param[in] _id Unique scene Id
       /// \param[in] _name Scene name

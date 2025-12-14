@@ -212,6 +212,8 @@ class GZ_RENDERING_OGRE2_HIDDEN gz::rendering::Ogre2GpuRaysPrivate
 
   /// \brief Pointer to the particle target definition in the workspace
   public: Ogre::CompositorTargetDef *particleTargetDef{nullptr};
+
+  public: std::mutex mutex; 
 };
 
 using namespace gz;
@@ -581,6 +583,8 @@ void Ogre2GpuRays::Destroy()
 {
   if (!this->dataPtr->ogreCamera)
     return;
+
+  std::lock_guard<std::mutex> queue_lock(this->dataPtr->mutex);
 
   if (this->dataPtr->gpuRaysScan)
   {
@@ -1099,6 +1103,8 @@ void Ogre2GpuRays::Setup1stPass()
 /////////////////////////////////////////////////////////
 void Ogre2GpuRays::Setup2ndPass()
 {
+  std::lock_guard<std::mutex> queue_lock(this->dataPtr->mutex);
+
   // Create second pass RTT, which stores the final range data output
   // see PostRender on how we retrieve data from this texture
   auto engine = Ogre2RenderEngine::Instance();
@@ -1299,6 +1305,14 @@ void Ogre2GpuRays::PreRender()
 //////////////////////////////////////////////////
 void Ogre2GpuRays::PostRender()
 {
+  if (!this->dataPtr->secondPassTexture)
+  {
+    gzerr << "Null second pass texture" << std::endl;
+    return;
+  }
+
+  std::lock_guard<std::mutex> queue_lock(this->dataPtr->mutex);
+
   unsigned int width = this->dataPtr->w2nd;
   unsigned int height = this->dataPtr->h2nd;
 
@@ -1308,7 +1322,10 @@ void Ogre2GpuRays::PostRender()
 
   // blit data from gpu to cpu
   Ogre::Image2 image;
-  image.convertFromTexture(this->dataPtr->secondPassTexture, 0u, 0u);
+  {
+    std::lock_guard<std::mutex> gpu_ticket_lock(Ogre2Scene::texture_gpu_ticket_mutex);
+    image.convertFromTexture(this->dataPtr->secondPassTexture, 0u, 0u);
+  }
   Ogre::TextureBox box = image.getData(0u);
   float *bufferTmp = static_cast<float *>(box.data);
 
